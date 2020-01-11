@@ -341,6 +341,29 @@
                   e)))
          (into []))))
 
+(defn file-env-entry->workspace-symbol [uri [e kind]]
+  (let [{:keys [sym row col end-row end-col sym]} e
+        symbol-kind (entry-kind->symbol-kind kind)
+        r {:start {:line (dec row) :character (dec col)}
+           :end {:line (dec end-row) :character (dec end-col)}}]
+    {:name (str sym)
+     :kind symbol-kind
+     :location {:uri uri :range r}}))
+
+(defn workspace-symbols [query]
+  (if (seq query)
+    (let [file-envs (:file-envs @db/db)]
+     (->> file-envs
+          (mapcat (fn [[uri env]]
+                    (->> env
+                         (keep #(cond (:kind %) [% (:kind %)]
+                                      (is-declaration? %) [% :declaration]
+                                      :else nil))
+                         (filter #(string/starts-with? (str (:sym (first %))) query))
+                         (map (partial file-env-entry->workspace-symbol uri)))))
+          (sort-by :name)))
+    []))
+
 (def refactorings
   {"cycle-coll" #'refactor/cycle-coll
    "thread-first" #'refactor/thread-first

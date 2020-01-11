@@ -20,6 +20,7 @@
       PublishDiagnosticsParams
       Range
       SymbolKind
+      SymbolInformation
       TextDocumentEdit
       TextEdit
       VersionedTextDocumentIdentifier
@@ -103,6 +104,12 @@
 (s/def ::document-symbols (s/and (s/coll-of ::document-symbol)
                                  (s/conformer (fn [c]
                                                 (map #(Either/forRight %) c)))))
+
+(s/def ::symbol-information (s/and (s/keys :req-un [::name :symbol/kind ::location])
+                                   (s/conformer (fn [m]
+                                                  (SymbolInformation. (:name m) (:kind m) (:location m))))))
+
+(s/def ::workspace-symbols (s/coll-of ::symbol-information))
 
 (s/def ::severity (s/and integer?
                          (s/conformer #(DiagnosticSeverity/forValue %1))))
