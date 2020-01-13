@@ -42,12 +42,21 @@
     (is (= 0 (count (parser/parse-params (z/of-string "[]") context {}))))))
 
 (deftest handle-fn-test
-  (let [zloc (z/of-string "(fn [^String b])")
-        context (volatile! {})]
-    (parser/handle-fn (z/next zloc) zloc context {})
-    (is (= '{"java.lang.String" #{:norename}
-             "b" #{:declare :param}}
-           (into {} (map (juxt (comp name :sym) :tags) (:usages @context)))))))
+  (testing "fn with type hint in parameters"
+    (let [zloc (z/of-string "(fn [^String b])")
+          context (volatile! {})]
+      (parser/handle-fn (z/next zloc) zloc context {})
+      (is (= '{"java.lang.String" #{:norename}
+               "b" #{:declare :param}}
+             (into {} (map (juxt (comp name :sym) :tags) (:usages @context)))))))
+
+  (testing "fn with type hinted return value"
+    (let [zloc (z/of-string "(fn ^String [^String b])")
+          context (volatile! {})]
+      (parser/handle-fn (z/next zloc) zloc context {})
+      (is (= '{"java.lang.String" #{:norename}
+               "b" #{:declare :param}}
+             (into {} (map (juxt (comp name :sym) :tags) (:usages @context))))))))
 
 (deftest qualify-ident-test
   (let [context {:file-type :clj}]
@@ -133,6 +142,22 @@
       (is (= "[b] b)" (scoped-str code (:scope-bounds bound-ref))))
       (is (= (:sym bound-ref) (:sym usage-ref)))
       (is (= (:scope-bounds bound-ref) (:scope-bounds usage-ref))))))
+
+(deftest wat
+    (let [code "(defn ^:private ^:foo a [b] b a) ^:qux a"
+          usages (parser/find-usages code :clj {})
+          [_ defn-ref bound-ref usage-ref _ _ outside-scope-ref] usages]
+      (println usages)
+      (is (= 'user/a (:sym defn-ref)))
+      (is (= #{:declare :local} (:tags defn-ref)))
+      (is (not= "user" (namespace (:sym bound-ref))))
+      (is (= "b" (name (:sym bound-ref))))
+      (is (= #{:declare :param} (:tags bound-ref)))
+      (is (= "[b] b a)" (scoped-str code (:scope-bounds bound-ref))))
+      (is (= (:sym bound-ref) (:sym usage-ref)))
+      (is (= (:scope-bounds bound-ref) (:scope-bounds usage-ref)))
+      (is (= "user" (namespace (:sym outside-scope-ref))))
+      (is (= "a" (name (:sym outside-scope-ref))))))
 
 (deftest find-references-let-test
   (testing "let"
@@ -355,6 +380,7 @@
       (is (= (:sym (nth usages 3 nil)) (:sym (nth usages 4 nil)))))
     (let [code "(def GET) (GET \"/my-route/:id\" {{:keys [id]} :params} id)"
           usages (parser/find-usages code :clj {'user/GET [:_ :params :bound-elements]})]
+      (println usages)
       (is (= 7 (count usages)))
       (is (= (:sym (nth usages 5 nil)) (:sym (nth usages 6 nil))))))
   (testing "for-like"

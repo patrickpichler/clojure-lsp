@@ -321,9 +321,15 @@
       (log/warn "bindings" (.getMessage e) (z/sexpr bindings-loc) (z/sexpr (z/up bindings-loc)))
       (throw e))))
 
-(defn parse-params [params-loc context scoped]
+(defn- adjust-param-loc [loc]
+  (case (z/tag loc)
+    :vector loc
+    :meta ((comp z/right z/down) loc)))
+
+(defn parse-params [loc context scoped]
   (try
-    (let [{:keys [row col]} (meta (z/node params-loc))
+    (let [params-loc (adjust-param-loc loc)
+          {:keys [row col]} (meta (z/node params-loc))
           {:keys [end-row end-col]} (meta (z/node (z/up params-loc)))
           scope-bounds {:row row :col col :end-row end-row :end-col end-col}
           single? (not= :vector (z/tag params-loc))]
@@ -337,7 +343,7 @@
               (recur (z-right-sexpr param-loc) new-scoped)))
           scoped)))
     (catch Exception e
-      (log/warn "params" (.getMessage e) (z/sexpr params-loc))
+      (log/warn "params" (.getMessage e) (z/sexpr loc))
       (throw e))))
 
 (defn handle-ignored
@@ -482,14 +488,15 @@
                  context scoped)))
 
 (defn- function-signatures [params-loc]
-  (if (= :list (z/tag params-loc))
-    (loop [list-loc params-loc
-           params []]
-      (let [params (conj params (z/string (z/down list-loc)))]
-        (if-let [next-list (z/find-next-tag list-loc :list)]
-          (recur next-list params)
-          params)))
-    [(z/string params-loc)]))
+  (case (z/tag params-loc)
+    :list (loop [list-loc params-loc
+                 params []]
+            (let [params (conj params (z/string (z/down list-loc)))]
+              (if-let [next-list (z/find-next-tag list-loc :list)]
+                (recur next-list params)
+                params)))
+    :vector [(z/string params-loc)]
+    :meta  (recur ((comp z/right z/down) params-loc))))
 
 (defn- single-params-and-body [params-loc context scoped]
   (let [body-loc (z-right-sexpr params-loc)]
@@ -497,12 +504,14 @@
          (handle-rest body-loc context))))
 
 (defn- function-params-and-bodies [params-loc context scoped]
-  (if (= :list (z/tag params-loc))
-    (loop [list-loc params-loc]
-      (single-params-and-body (z/down list-loc) context scoped)
-      (when-let [next-list (z/find-next-tag list-loc :list)]
-        (recur next-list)))
-    (single-params-and-body params-loc context scoped)))
+  (case (z/tag params-loc)
+    :list (loop [list-loc params-loc]
+            (single-params-and-body (z/down list-loc) context scoped)
+            (when-let [next-list (z/find-next-tag list-loc :list)]
+              (recur next-list)))
+    :vector (single-params-and-body params-loc context scoped)
+    :meta (do
+            (recur ((comp z/right z/down) params-loc) context scoped))))
 
 (def check (fn [pred x] (when (pred x) x)))
 
@@ -511,7 +520,9 @@
   (let [op-local? (local? op-loc)
         op-fn? (= "fn" (name (z/sexpr op-loc)))
         name-loc (z-right-sexpr op-loc)
-        params-loc (z/find op-loc (fn [loc] (#{:vector :list} (z/tag loc))))]
+        param-start-loc (if op-fn? op-loc (z/right name-loc))
+        params-loc (z/find param-start-loc (fn [loc] (#{:vector :list :meta} (z/tag loc))))]
+    (println "========" (z/sexpr param-start-loc))
     (when (symbol? (z/sexpr name-loc))
       (cond
         op-fn? nil
